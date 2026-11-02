@@ -2,3 +2,9 @@
 build/
 *.xcuserstate
 xcuserdata/
+
+# AirBuild 平台目录（manifest、构建产物、worktree）：不进仓库，也永远不要 git clean -x
+.airbuild/
+
+# 测试产物
+*.xcresult
