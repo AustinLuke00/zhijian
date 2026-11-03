@@ -47,6 +47,18 @@ struct NotebookBookInfoDTO: Decodable, Sendable {
 struct BookmarkListDTO: Decodable, Sendable {
     let updated: [BookmarkDTO]?
     let chapters: [ChapterDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case updated, chapters
+    }
+
+    init(from decoder: Decoder) throws {
+        // Keep this keyed-container check strict: an array/scalar response is not a
+        // valid endpoint response and must still surface as a decoding error.
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        updated = try container.decodeLossyArrayIfPresent(BookmarkDTO.self, forKey: .updated)
+        chapters = try container.decodeLossyArrayIfPresent(ChapterDTO.self, forKey: .chapters)
+    }
 }
 
 struct BookmarkDTO: Decodable, Sendable {
@@ -57,6 +69,21 @@ struct BookmarkDTO: Decodable, Sendable {
     let range: String?
     let colorStyle: Int?
     let type: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case bookmarkId, chapterUid, markText, createTime, range, colorStyle, type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bookmarkId = try container.decodeRequiredStringOrNumber(forKey: .bookmarkId)
+        chapterUid = try container.decodeRequiredFlexibleInt(forKey: .chapterUid)
+        markText = try? container.decodeIfPresent(String.self, forKey: .markText)
+        createTime = container.decodeFlexibleIntIfPresent(forKey: .createTime)
+        range = try? container.decodeIfPresent(String.self, forKey: .range)
+        colorStyle = container.decodeFlexibleIntIfPresent(forKey: .colorStyle)
+        type = container.decodeFlexibleIntIfPresent(forKey: .type)
+    }
 
     /// 只要 type=1（划线）。接口已经过滤过，这里是双保险：
     /// 万一将来接口把书签一起返回，也不能把书签当划线导进来。
@@ -73,6 +100,70 @@ struct ChapterDTO: Decodable, Sendable {
     let chapterUid: Int
     let chapterIdx: Int?
     let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case chapterUid, chapterIdx, title
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        chapterUid = try container.decodeRequiredFlexibleInt(forKey: .chapterUid)
+        chapterIdx = container.decodeFlexibleIntIfPresent(forKey: .chapterIdx)
+        title = try? container.decodeIfPresent(String.self, forKey: .title)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeLossyArrayIfPresent<T: Decodable>(
+        _ type: T.Type,
+        forKey key: Key
+    ) throws -> [T]? {
+        guard contains(key), !((try? decodeNil(forKey: key)) ?? false) else { return nil }
+        var container = try nestedUnkeyedContainer(forKey: key)
+        var values: [T] = []
+        while !container.isAtEnd {
+            // Taking an element decoder advances the array exactly once whether
+            // decoding that element succeeds or fails.
+            let elementDecoder = try container.superDecoder()
+            if let value = try? T(from: elementDecoder) {
+                values.append(value)
+            }
+        }
+        return values
+    }
+
+    func decodeFlexibleIntIfPresent(forKey key: Key) -> Int? {
+        guard contains(key), !((try? decodeNil(forKey: key)) ?? false) else { return nil }
+        if let value = try? decode(Int.self, forKey: key) { return value }
+        if let value = try? decode(String.self, forKey: key) { return Int(value) }
+        return nil
+    }
+
+    func decodeRequiredFlexibleInt(forKey key: Key) throws -> Int {
+        if let value = decodeFlexibleIntIfPresent(forKey: key) { return value }
+        throw DecodingError.dataCorruptedError(
+            forKey: key,
+            in: self,
+            debugDescription: "Expected an integer or numeric string"
+        )
+    }
+
+    func decodeRequiredStringOrNumber(forKey key: Key) throws -> String {
+        if let value = try? decode(String.self, forKey: key), !value.isEmpty { return value }
+        if let value = try? decode(Int.self, forKey: key) { return String(value) }
+        if let value = try? decode(Double.self, forKey: key), value.isFinite {
+            if value.rounded() == value,
+               value >= Double(Int.min), value <= Double(Int.max) {
+                return String(Int(value))
+            }
+            return String(value)
+        }
+        throw DecodingError.dataCorruptedError(
+            forKey: key,
+            in: self,
+            debugDescription: "Expected a bookmark identifier as a string or number"
+        )
+    }
 }
 
 /// `/review/list/mine` 的回包。

@@ -183,6 +183,7 @@ struct ImportPipeline: Sendable {
         let quotes = DTOMapper.quotePayloads(from: bookmarkDTO, bookId: bookId)
         let thoughts = reviewDTOs.flatMap { DTOMapper.thoughtPayloads(from: $0, bookId: bookId) }
 
+        try Task.checkCancellation()
         return try await store.persist(
             book: bookPayload,
             quotes: quotes,
